@@ -1,16 +1,35 @@
 'use client'
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect } from 'react';
 import mapboxgl from 'mapbox-gl';
 import Threebox from 'threebox-plugin/src/Threebox';
 import * as THREE from 'three';
+
+import 'mapbox-gl/dist/mapbox-gl.css'
+
+import stacking from '../../data/stacking.json';
 
 export default function Home() {
     const mapRef = useRef();
     const mapContainerRef = useRef();
 
+    const buildingFloorHeight = stacking.height/stacking.floors;
+    const randomColors = ['#00c7be', '#30b0c7', '#32ade6', '#007aff', '#5856d6']
+
+    var floorPopup = new mapboxgl.Popup();
+    
+    function showInfo(e) {
+        const floor = e.features[0].properties.floor;
+        floorPopup = new mapboxgl.Popup().setLngLat(e.lngLat).setHTML(`
+        <div class="w-52 text-black">
+            <div class="font-bold">Floor ${floor}</div>
+            <div class="text-lg">${stacking.stackingplan[floor-1].map(e => '<div>'+e+'</div>').join('')}</div>
+        </div>
+        `).addTo(mapRef.current);
+    }
+
     useEffect(() => {
-        mapboxgl.accessToken = 'pk.eyJ1IjoiaWtzb21ldGhpbmdzb21ldGhpbmczODIzIiwiYSI6ImNseDk4d3c1MDJyYWkybXB2cXgzeGZqZ2kifQ.nFz0xuCOfn17Kj0bu2ahiw';
+        mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
         mapRef.current = new mapboxgl.Map({
             container: mapContainerRef.current,
             style: 'mapbox://styles/mapbox/light-v11',
@@ -18,10 +37,43 @@ export default function Home() {
             zoom: 17,
             pitch: 60,
         });
-        
+
         mapRef.current.on('style.load', () => {
+            mapRef.current.addSource('stackingplan', {
+                'type': 'geojson',
+                'data': {
+                    'type': 'FeatureCollection',
+                    'features': [...Array(stacking.floors).keys()].map(e => ({
+                        'type': 'Feature',
+                        'properties': {
+                            'floor': e+1,
+                            'height': (e+1)*buildingFloorHeight, // I think this is in meters
+                            'base_height': e*buildingFloorHeight, // Removes bottom, doesn't move it up
+                            'color': stacking.stackingplan[e].length ? stacking.tenants[stacking.stackingplan[e][0]].color : '#ffffff'
+                        },
+                        'geometry': {
+                            'coordinates': [
+                                stacking.coordinates[stacking.coordinatefloors.findIndex(floor => e+1<=floor)]
+                            ],
+                            'type': 'Polygon'
+                        }
+                    }))
+                }
+            });
             mapRef.current.addLayer({
-                id: 'stacking-plan',
+                'id': 'stacking-plan',
+                'type': 'fill-extrusion',
+                'source': 'stackingplan',
+                'paint': {
+                    'fill-extrusion-color': ['get', 'color'],
+                    'fill-extrusion-height': ['get', 'height'],
+                    'fill-extrusion-base': ['get', 'base_height'],
+                    'fill-extrusion-opacity': 1
+                }
+            });
+
+            mapRef.current.addLayer({
+                id: 'pennzoil-place',
                 type: 'custom',
                 renderingMode: '3d',
                 paint: {
@@ -49,16 +101,6 @@ export default function Home() {
                     dl2.position.set(0, 70, 100).normalize();
                     window.tb.scene.add(dl2);
 
-                    var geometry1 = new THREE.BoxGeometry(60, 60, 60);
-                    var material1 = new THREE.MeshStandardMaterial({
-                        color: new THREE.Color(0xff0000),
-                        side: THREE.DoubleSide,
-                        clippingPlanes: [
-                            new THREE.Plane(new THREE.Vector3(0, 0, 0), 5.1)
-                        ],
-                        clipIntersection: true
-                    });
-
                     window.tb.loadObj(options, (model) => {
                         model.setCoords([-95.36576714742297, 29.76046335699732]);
                         model.setRotation({ x: 0, y: 0, z: 235 });
@@ -70,13 +112,16 @@ export default function Home() {
                 }
             });
         });
+            
+        mapRef.current.on('mouseenter', 'stacking-plan', (e) => showInfo(e));
+        mapRef.current.on('mouseleave', 'stacking-plan', () => floorPopup.remove());
 
         return () => mapRef.current.remove();
     }, []);
 
     return (
-        <div className="overflow-hidden">
-            <div id="map-container" ref={mapContainerRef} className="w-screen h-screen"></div>
+        <div className='overflow-hidden'>
+            <div id='map-container' ref={mapContainerRef} className='w-screen h-screen'></div>
         </div>
     );
 }
