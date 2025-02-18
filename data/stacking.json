@@ -10,10 +10,32 @@
         },
         "Cheniere": {
             "color": "#0876c6"
+        },
+        "The SQ": {
+            "color": "#989c2d"
+        },
+        "Chicago Title": {
+            "color": "#f6bf32"
+        },
+        "Charter Title Company": {
+            "color": "#6e7272"
+        },
+        "Squarepoint Capital": {
+            "color": "#9fcbed"
+        },
+        "Moelis & Company": {
+            "color": "#b08f2e"
+        },
+        "Sheppard Mullin": {
+            "color": "#005695"
+        },
+        "Sable Offshore Corp": {
+            "color": "#191f3e"
         }
     },
     "stackingplan": [
         [],
+        [["The SQ", 1]],
         [],
         [],
         [],
@@ -23,44 +45,43 @@
         [],
         [],
         [],
+        [["Cheniere", 0.4444], ["The SQ", 0.25]],
+        [["Cheniere", 1]],
+        [["Cheniere", 1]],
+        [["Cheniere", 1]],
+        [["Cheniere", 1]],
         [],
-        ["Cheniere"],
-        ["Cheniere"],
-        ["Cheniere"],
-        ["Cheniere"],
-        ["Cheniere"],
-        [],
-        [],
-        [],
+        [["Squarepoint Capital", 0.2278]],
         [],
         [],
         [],
+        [["Moelis & Company", 0.84]],
         [],
         [],
+        [["Sheppard Mullin", 0.82]],
         [],
         [],
-        [],
-        [],
-        [],
-        ["Hines"],
-        ["Hines"],
-        ["Hines"],
-        ["Hines"],
-        ["Hines"],
-        [],
+        [["Sable Offshore Corp", 1]],
+        [["Chicago Title", 0.2892], ["Sable Offshore Corp", 0.2778]],
+        [["Hines", 1]],
+        [["Hines", 1]],
+        [["Hines", 1]],
+        [["Hines", 1]],
+        [["Hines", 1]],
         [],
         [],
         [],
         [],
+        [["Charter Title Company", 0.1319]],
         [],
         [],
-        ["Vinson & Elkins"],
-        ["Vinson & Elkins"],
-        ["Vinson & Elkins"],
-        ["Vinson & Elkins"],
-        ["Vinson & Elkins"],
-        ["Vinson & Elkins"],
-        ["Vinson & Elkins"]
+        [["Vinson & Elkins", 1]],
+        [["Vinson & Elkins", 1]],
+        [["Vinson & Elkins", 1]],
+        [["Vinson & Elkins", 1]],
+        [["Vinson & Elkins", 1]],
+        [["Vinson & Elkins", 1]],
+        [["Vinson & Elkins", 1]]
     ],
     "coordinatefloors": [11,48],
     "coordinates": [
