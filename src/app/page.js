@@ -12,9 +12,10 @@ import stacking from '../../data/stacking.json';
 
 /**
  * Finds point intersecting GeoJSON geometry side using line-line intersection calculation
- * @param {float[]} centerCoord Center of building
+ * @param {float[]} centerCoord Center of floor plan
  * @param {float} percentCircle Value 0.0 to 1.0 representing percent of circle from 0 to 2*PI radians
- * @param {int} floorPlan Floorplan of building from JSON
+ * @param {int} floorPlan Floor plan index of building from JSON
+ * @returns List of length 2 with interesection point and larger index of endpoint if found, else null
  */
 function findIntersection(centerCoord, percentCircle, floorPlan) {
     // Margin of error else won't detect intersection of PI/2 multiples
@@ -44,10 +45,66 @@ function findIntersection(centerCoord, percentCircle, floorPlan) {
            Math.abs(interPoint[1]-currCoord[1])+Math.abs(interPoint[1]-prevCoord[1])<=Math.abs(currCoord[1]-prevCoord[1])+marginOfError &&
            Math.abs(interPoint[0]-centerCoord[0])+Math.abs(interPoint[0]-radialCoord[0])<=Math.abs(centerCoord[0]-radialCoord[0])+marginOfError &&
            Math.abs(interPoint[1]-centerCoord[1])+Math.abs(interPoint[1]-radialCoord[1])<=Math.abs(centerCoord[1]-radialCoord[1])+marginOfError) {
-            return interPoint;
+            return [interPoint, i];
         }
     }
+    console.log('cannot find intersection for percentage: '+percentCircle);
     return null;
+}
+
+/**
+ * Splits GeoJSON shape into pie slices and returns list of GeoJSON shapes
+ * @param {float[]} centerCoord Center of floor plan
+ * @param {float[]} percentageList List of values from 0.0 to 1.0 that should add up 1.0
+ * @param {*} floorPlan Floor plan index of building from JSON
+ * @returns List of GeoJSON shapes radially split
+ */
+function proportionGeojson(centerCoord, percentageList, floorPlan) {
+    var geoJsonList = [];
+    var percentSum = 0.0;
+
+    // Detects if GeoJSON is counterclockwise, uses shoelace formula (solution from https://stackoverflow.com/questions/14505565/detect-if-a-set-of-points-in-an-array-that-are-the-vertices-of-a-complex-polygon)
+    var area = 0;
+    stacking.coordinates[floorPlan].forEach((e, i) => {
+        const nextCoord = stacking.coordinates[floorPlan][(i+1)%stacking.coordinates[floorPlan].length];
+        area += e[0]*nextCoord[1];
+        area -= e[1]*nextCoord[0];
+    });
+    const isClockwise = area<0;
+
+    // Normalization in case the sum isn't 1.0
+    const percentageListSum = percentageList.reduce((a, b) => a+b, 0);
+    if(percentageListSum!==1.0) {
+        percentageList = percentageList.map((e) => e/percentageListSum);
+    }
+
+    percentageList.forEach((percent) => {
+        var geoJsonSlice = [];
+
+        var [lowerPercentInterPoint, lowerPercentInd] = findIntersection(centerCoord, percentSum, floorPlan);
+        percentSum += percent;
+        var [higherPercentInterPoint, higherPercentInd] = findIntersection(centerCoord, percentSum, floorPlan);
+
+        // Makes sure we add points in the same direction as GeoJSON shape
+        if(isClockwise) {
+            [lowerPercentInterPoint, lowerPercentInd, higherPercentInterPoint, higherPercentInd] = [higherPercentInterPoint, higherPercentInd, lowerPercentInterPoint, lowerPercentInd];
+        }
+        // In case GeoJSON ends in between percentages
+        if(lowerPercentInd>higherPercentInd) {
+            higherPercentInd = stacking.coordinates[floorPlan].length+higherPercentInd;
+        }
+
+        // Pushes one side of slice, points in between, other side of slice
+        geoJsonSlice.push(centerCoord, lowerPercentInterPoint);
+        for(var i=lowerPercentInd;i<higherPercentInd;i++) {
+            geoJsonSlice.push(stacking.coordinates[floorPlan][i%stacking.coordinates[floorPlan].length]);
+        }
+        geoJsonSlice.push(higherPercentInterPoint, centerCoord);
+
+        geoJsonList.push(geoJsonSlice);
+    });
+
+    return geoJsonList;
 }
 
 export default function Home() {
@@ -69,6 +126,8 @@ export default function Home() {
         </div>
         `).addTo(mapRef.current);
     }
+    
+    var floorPopup = new mapboxgl.Popup();
 
     useEffect(() => {
         var centerCoord = []
@@ -91,46 +150,76 @@ export default function Home() {
             });
             centerCoord.push([(maxCoord[0]+minCoord[0])/2, (maxCoord[1]+minCoord[1])/2]);
         });
-    
-        var intersections = [];
-        for(var i=0;i<100;i++) {
-            intersections.push({
-                "type": "Feature",
-                "geometry": {
-                    "coordinates": findIntersection(centerCoord[0], i*0.01, 0),
-                    "type": "Point"
-                }
-            });
-        }
-        for(var i=0;i<100;i++) {
-            intersections.push({
-                "type": "Feature",
-                "geometry": {
-                    "coordinates": findIntersection(centerCoord[1], i*0.01, 1),
-                    "type": "Point"
-                }
-            });
-        }
-    
-        var floorPopup = new mapboxgl.Popup();
+
         var jasons = [];
-    
+        var stackingPlanIndex;
         [...Array(stacking.floors).keys()].forEach(e => {
-            jasons.push({
-                'type': 'Feature',
-                'properties': {
-                    'floor': e+1,
-                    'height': (e+1)*buildingFloorHeight, // I think this is in meters
-                    'base_height': e*buildingFloorHeight+0.5, // Removes bottom, doesn't move it up
-                    'color': stacking.stackingplan[e].length ? chroma.average(stacking.stackingplan[e].map(tenant => stacking.tenants[tenant[0]].color)).hex() : '#ffffff'
-                },
-                'geometry': {
-                    'coordinates': [
-                        stacking.coordinates[stacking.coordinatefloors.findIndex(floor => e+1<=floor)]
-                    ],
-                    'type': 'Polygon'
-                }
+            var vacancy = 1.0;
+            var percentageList = [];
+            stacking.stackingplan[e].forEach((tenant) => {
+                percentageList.push(tenant[1]);
+                vacancy -= tenant[1];
             });
+            if(vacancy!==0.0) {
+                percentageList.push(vacancy);
+            }
+
+            stackingPlanIndex = stacking.coordinatefloors.findIndex(floor => e+1<=floor);
+            
+            // Prevents unnecessary slicing computations for 0 or 1 tenant floors
+            if(percentageList.length<=1) {
+                jasons.push({
+                    'type': 'Feature',
+                    'properties': {
+                        'floor': e+1,
+                        'height': (e+1)*buildingFloorHeight, // I think this is in meters
+                        'base_height': e*buildingFloorHeight+0.5, // Removes bottom, doesn't move it up
+                        'color': stacking.stackingplan[e].length ? stacking.tenants[stacking.stackingplan[e][0][0]].color : '#ffffff'
+                    },
+                    'geometry': {
+                        'coordinates': [
+                            stacking.coordinates[stackingPlanIndex]
+                        ],
+                        'type': 'Polygon'
+                    }
+                });
+            }
+            else {
+                proportionGeojson(centerCoord[stackingPlanIndex], percentageList, stackingPlanIndex).forEach((geoJsonSlice, tenantInd) => {
+                    jasons.push({
+                        'type': 'Feature',
+                        'properties': {
+                            'floor': e+1,
+                            'height': (e+1)*buildingFloorHeight, // I think this is in meters
+                            'base_height': e*buildingFloorHeight+0.5, // Removes bottom, doesn't move it up
+                            'color': vacancy!==0.0 && tenantInd===percentageList.length-1 ? '#ffffff' : stacking.tenants[stacking.stackingplan[e][tenantInd][0]].color
+                        },
+                        'geometry': {
+                            'coordinates': [
+                                geoJsonSlice
+                            ],
+                            'type': 'Polygon'
+                        }
+                    });
+                });
+            }
+        });
+
+        // Roof of building so that slices are hidden
+        jasons.push({
+            'type': 'Feature',
+            'properties': {
+                'floor': stacking.floors,
+                'height': stacking.floors*buildingFloorHeight+1, // I think this is in meters
+                'base_height': stacking.floors*buildingFloorHeight+0.5, // Removes bottom, doesn't move it up
+                'color': '#ffffff'
+            },
+            'geometry': {
+                'coordinates': [
+                    stacking.coordinates[stackingPlanIndex]
+                ],
+                'type': 'Polygon'
+            }
         });
 
         mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -150,31 +239,6 @@ export default function Home() {
                     'features': jasons
                 }
             });
-            mapRef.current.addSource('centerpoint', {
-                type: 'geojson',
-                data: {
-                    "type": "FeatureCollection",
-                    "features": [
-                        {
-                            "type": "Feature",
-                            "geometry": {
-                                "coordinates": [
-                                    centerCoord[0][0],
-                                    centerCoord[0][1]
-                                ],
-                                "type": "Point"
-                            }
-                        }
-                    ]
-                }
-            });
-            mapRef.current.addSource('intersection', {
-                type: 'geojson',
-                data: {
-                    "type": "FeatureCollection",
-                    "features": intersections
-                }
-            });
             mapRef.current.addLayer({
                 'id': 'stackingplan-layer',
                 'type': 'fill-extrusion',
@@ -185,28 +249,6 @@ export default function Home() {
                     'fill-extrusion-base': ['get', 'base_height'],
                     'fill-extrusion-opacity': 1
                 }
-            });
-            mapRef.current.addLayer({
-                id: 'centerpoint-layer',
-                type: 'circle',
-                source: 'centerpoint',
-                paint: {
-                    'circle-radius': 5,
-                    'circle-stroke-color': '#b70021',
-                    'circle-stroke-width': 5,
-                    'circle-color': '#ffffff',
-                },
-            });
-            mapRef.current.addLayer({
-                id: 'intersection-layer',
-                type: 'circle',
-                source: 'intersection',
-                paint: {
-                    'circle-radius': 5,
-                    'circle-stroke-color': '#b70021',
-                    'circle-stroke-width': 5,
-                    'circle-color': '#ffffff',
-                },
             });
 
             mapRef.current.addLayer({
